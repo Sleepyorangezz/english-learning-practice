@@ -1,0 +1,494 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AI 沉浸式精听 Demo</title>
+  <style>
+    :root {
+      --bg: #0f1115;
+      --panel: #181c23;
+      --panel-2: #1f2631;
+      --text: #e9eef5;
+      --muted: #9aa4b5;
+      --accent: #3ef3a8;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Inter", "SF Pro Display", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: radial-gradient(circle at 10% 20%, rgba(62, 243, 168, 0.12), transparent 25%),
+        radial-gradient(circle at 80% 0%, rgba(62, 243, 168, 0.08), transparent 35%),
+        var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+    }
+    header {
+      padding: 24px 32px;
+      border-bottom: 1px solid #252b35;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      background: linear-gradient(90deg, rgba(62, 243, 168, 0.08), transparent);
+    }
+    .logo-dot {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      background: var(--accent);
+      box-shadow: 0 0 18px rgba(62, 243, 168, 0.6);
+    }
+    main {
+      padding: 28px 32px 48px;
+      display: grid;
+      grid-template-columns: 1.1fr 1fr;
+      gap: 20px;
+    }
+    .card {
+      background: linear-gradient(145deg, rgba(255, 255, 255, 0.02), rgba(62, 243, 168, 0.03));
+      border: 1px solid #202733;
+      border-radius: 16px;
+      padding: 20px;
+      box-shadow: 0 20px 50px rgba(0, 0, 0, 0.4);
+    }
+    .card h2 {
+      margin: 0 0 12px;
+      font-size: 18px;
+      color: var(--text);
+    }
+    .helper {
+      font-size: 13px;
+      color: var(--muted);
+      margin-bottom: 12px;
+    }
+    textarea {
+      width: 100%;
+      min-height: 200px;
+      border-radius: 12px;
+      background: var(--panel);
+      border: 1px solid #222836;
+      color: var(--text);
+      padding: 12px;
+      resize: vertical;
+      font-size: 14px;
+      line-height: 1.6;
+    }
+    .actions {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-top: 10px;
+    }
+    button {
+      background: linear-gradient(120deg, #34d889, #3ef3a8);
+      border: none;
+      color: #0c0f12;
+      font-weight: 700;
+      padding: 10px 16px;
+      border-radius: 10px;
+      cursor: pointer;
+      box-shadow: 0 10px 30px rgba(62, 243, 168, 0.35);
+      transition: transform 0.15s ease, box-shadow 0.15s ease;
+    }
+    button:hover { transform: translateY(-1px); box-shadow: 0 12px 34px rgba(62, 243, 168, 0.4); }
+    button:disabled { opacity: 0.6; cursor: not-allowed; box-shadow: none; transform: none; }
+    .file-input {
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .listening-stage {
+      position: relative;
+      min-height: 400px;
+      background: var(--panel);
+      border: 1px solid #202733;
+      border-radius: 16px;
+      padding: 18px;
+      overflow: hidden;
+    }
+    .voiceprint {
+      width: 130px;
+      height: 130px;
+      border-radius: 50%;
+      margin: 12px auto;
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: radial-gradient(circle, rgba(62, 243, 168, 0.2), rgba(62, 243, 168, 0.02));
+      cursor: pointer;
+      transition: transform 0.2s ease;
+    }
+    .voiceprint:hover { transform: scale(1.02); }
+    .wave-ring {
+      position: absolute;
+      border: 1px solid rgba(62, 243, 168, 0.6);
+      border-radius: 50%;
+      width: 100%;
+      height: 100%;
+      animation: ripple 3s infinite;
+      opacity: 0.5;
+    }
+    .wave-ring:nth-child(1) { animation-delay: 0s; }
+    .wave-ring:nth-child(2) { animation-delay: 0.8s; }
+    .wave-ring:nth-child(3) { animation-delay: 1.6s; }
+    @keyframes ripple {
+      0% { transform: scale(0.8); opacity: 0.4; }
+      70% { transform: scale(1.3); opacity: 0; }
+      100% { opacity: 0; }
+    }
+    .voiceprint-icon {
+      width: 42px;
+      height: 42px;
+      border-radius: 12px;
+      background: #12161d;
+      border: 1px solid rgba(62, 243, 168, 0.55);
+      box-shadow: 0 10px 28px rgba(62, 243, 168, 0.35);
+      display: grid;
+      place-items: center;
+      color: var(--accent);
+      font-weight: 800;
+    }
+    .subtitle-panel {
+      margin-top: 12px;
+      background: var(--panel-2);
+      border: 1px solid #262f3f;
+      border-radius: 12px;
+      padding: 12px;
+      display: none;
+      gap: 8px;
+      flex-direction: column;
+    }
+    .subtitle-panel.active { display: flex; animation: fadeIn 0.25s ease; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(6px);} to { opacity: 1; transform: none;} }
+    .subtitle-item {
+      padding: 10px 12px;
+      border-radius: 10px;
+      border: 1px solid #232b3a;
+      background: rgba(255, 255, 255, 0.02);
+      color: var(--text);
+      cursor: pointer;
+      position: relative;
+      transition: border-color 0.15s ease, background 0.15s ease;
+    }
+    .subtitle-item:hover { border-color: rgba(62, 243, 168, 0.6); background: rgba(62, 243, 168, 0.05); }
+    .subtitle-item .badge {
+      position: absolute;
+      top: 10px;
+      right: 12px;
+      background: rgba(62, 243, 168, 0.15);
+      color: var(--accent);
+      padding: 4px 8px;
+      border-radius: 8px;
+      font-size: 11px;
+      border: 1px solid rgba(62, 243, 168, 0.3);
+    }
+    .status-bar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--muted);
+      font-size: 13px;
+      margin-top: 10px;
+    }
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--accent);
+      box-shadow: 0 0 12px rgba(62, 243, 168, 0.5);
+    }
+    .controls {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-top: 16px;
+      padding: 12px;
+      border-radius: 12px;
+      background: linear-gradient(90deg, rgba(62, 243, 168, 0.08), rgba(62, 243, 168, 0.02));
+      border: 1px solid #1f2634;
+    }
+    .play-btn {
+      width: 46px;
+      height: 46px;
+      border-radius: 50%;
+      background: var(--accent);
+      border: none;
+      color: #0e1115;
+      font-weight: 800;
+      font-size: 15px;
+      cursor: pointer;
+      box-shadow: 0 12px 40px rgba(62, 243, 168, 0.45);
+      transition: transform 0.15s ease;
+    }
+    .play-btn:hover { transform: translateY(-1px); }
+    .progress {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+    input[type="range"] {
+      -webkit-appearance: none;
+      width: 100%; height: 6px;
+      border-radius: 8px;
+      background: #1e242f;
+      outline: none;
+    }
+    input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 16px; height: 16px;
+      border-radius: 50%;
+      background: var(--accent);
+      box-shadow: 0 0 0 6px rgba(62, 243, 168, 0.15);
+      border: none;
+      cursor: pointer;
+    }
+    .analysis-pop {
+      position: absolute;
+      left: 24px;
+      right: 24px;
+      bottom: 70px;
+      background: #12161d;
+      border: 1px solid rgba(62, 243, 168, 0.45);
+      border-radius: 14px;
+      padding: 14px;
+      box-shadow: 0 16px 38px rgba(0, 0, 0, 0.45);
+      display: none;
+    }
+    .analysis-pop.active { display: block; animation: fadeIn 0.2s ease; }
+    .analysis-pop h4 { margin: 0 0 6px; color: var(--accent); }
+    .analysis-pop ul { margin: 0; padding-left: 18px; color: var(--text); }
+    .pill-row { display: flex; gap: 8px; margin-top: 6px; flex-wrap: wrap; }
+    .pill { background: rgba(62, 243, 168, 0.18); color: var(--accent); padding: 4px 8px; border-radius: 999px; font-size: 12px; }
+    .loading-screen {
+      position: fixed;
+      inset: 0;
+      background: rgba(12, 15, 20, 0.94);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      gap: 18px;
+      z-index: 999;
+      transition: opacity 0.3s ease;
+    }
+    .loading-screen.hidden { opacity: 0; pointer-events: none; }
+    .loader-text { color: var(--muted); font-size: 14px; }
+    .hint { font-size: 12px; color: var(--muted); text-align: center; }
+    @media (max-width: 1024px) { main { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <div class="loading-screen" id="loadingScreen">
+    <div class="voiceprint" style="cursor: default;">
+      <div class="wave-ring"></div><div class="wave-ring"></div><div class="wave-ring"></div>
+      <div class="voiceprint-icon">AI</div>
+    </div>
+    <div class="loader-text">初始化声纹环境中… 请佩戴耳机，保持安静</div>
+    <div class="hint">MiniMax 同步 TTS · 剑桥研究生雅思 8.5 目标听力体验</div>
+  </div>
+
+  <header>
+    <div class="logo-dot"></div>
+    <div>
+      <div style="font-weight: 700;">沉浸式精听训练（黑灰绿 Demo）</div>
+      <div style="color: var(--muted); font-size: 13px;">上传文本 → TTS 生成 → 声纹唤醒字幕 → 点击解析 → 进度拖拽</div>
+    </div>
+  </header>
+
+  <main>
+    <section class="card">
+      <h2>上传文本 / 粘贴听力材料</h2>
+      <div class="helper">雅思 2025 真题、6.5-7 分到 8.5 的精听突破场景。支持 txt 上传。</div>
+      <textarea id="scriptInput" placeholder="粘贴需要精听的文本，或上传 txt 文件。示例：A Cambridge professor discusses how AI reshapes postgraduate research collaboration ..."></textarea>
+      <div class="actions">
+        <label class="file-input">
+          <input type="file" id="fileInput" accept=".txt,text/plain" style="display:none;" />
+          <span style="cursor:pointer;">📂 选择文本文件</span>
+        </label>
+        <div style="display: flex; gap: 10px; align-items: center;">
+          <span id="statusTag" style="color: var(--muted); font-size: 13px;">未生成</span>
+          <button id="generateBtn">生成听力音频</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="card listening-stage">
+      <div class="status-bar">
+        <div class="status-dot"></div>
+        <div id="stageStatus">准备声纹唤醒字幕…</div>
+      </div>
+
+      <div class="voiceprint" id="voiceprint">
+        <div class="wave-ring"></div><div class="wave-ring"></div><div class="wave-ring"></div>
+        <div class="voiceprint-icon">◎</div>
+      </div>
+      <div class="hint">点击声纹或周围区域显示/收起字幕波纹；再点切换回声纹</div>
+
+      <div class="subtitle-panel" id="subtitlePanel"></div>
+
+      <div class="analysis-pop" id="analysisPop">
+        <h4>字幕解析</h4>
+        <ul id="analysisList"></ul>
+        <div class="pill-row" id="keywordRow"></div>
+      </div>
+
+      <div class="controls">
+        <button class="play-btn" id="playBtn">▶</button>
+        <div class="progress">
+          <span id="currentTime">00:00</span>
+          <input type="range" id="progressBar" min="0" value="0" step="0.1" />
+          <span id="totalTime">00:00</span>
+        </div>
+        <button class="play-btn" id="pauseBtn" style="background:#1f2634;color:var(--text);box-shadow:none;">❚❚</button>
+      </div>
+    </section>
+  </main>
+
+  <audio id="audio" preload="auto"></audio>
+
+  <script>
+    const scriptInput = document.getElementById('scriptInput');
+    const fileInput = document.getElementById('fileInput');
+    const generateBtn = document.getElementById('generateBtn');
+    const statusTag = document.getElementById('statusTag');
+    const stageStatus = document.getElementById('stageStatus');
+    const subtitlePanel = document.getElementById('subtitlePanel');
+    const voiceprint = document.getElementById('voiceprint');
+    const analysisPop = document.getElementById('analysisPop');
+    const analysisList = document.getElementById('analysisList');
+    const keywordRow = document.getElementById('keywordRow');
+    const audioEl = document.getElementById('audio');
+    const playBtn = document.getElementById('playBtn');
+    const pauseBtn = document.getElementById('pauseBtn');
+    const progressBar = document.getElementById('progressBar');
+    const currentTimeEl = document.getElementById('currentTime');
+    const totalTimeEl = document.getElementById('totalTime');
+    const loadingScreen = document.getElementById('loadingScreen');
+
+    let subtitles = [];
+    let hideAnalysisTimer = null;
+
+    const formatTime = (sec) => {
+      if (!sec || Number.isNaN(sec)) return '00:00';
+      const m = Math.floor(sec / 60).toString().padStart(2, '0');
+      const s = Math.floor(sec % 60).toString().padStart(2, '0');
+      return `${m}:${s}`;
+    };
+
+    const renderSubtitles = () => {
+      subtitlePanel.innerHTML = '';
+      subtitles.forEach((line, idx) => {
+        const item = document.createElement('div');
+        item.className = 'subtitle-item';
+        item.innerHTML = `<div class="badge">${idx === 0 ? '前句' : idx === 1 ? '当下' : '后句'}</div>${line.text}`;
+        item.addEventListener('click', () => analyzeLine(line));
+        subtitlePanel.appendChild(item);
+      });
+    };
+
+    const analyzeLine = (line) => {
+      const words = line.text.split(/\s+/).filter(Boolean);
+      const keywords = words.filter(w => w.length > 6).slice(0, 4);
+      const insights = [
+        `重音节奏：${Math.max(1, Math.round(words.length / 4))} 组停顿，关注连接音。`,
+        '口音提醒：雅思 8.5 水平，注意英式元音和弱读。',
+        '理解校验：尝试复述当前句，再对照字幕纠偏。'
+      ];
+
+      analysisList.innerHTML = '';
+      insights.forEach(text => {
+        const li = document.createElement('li');
+        li.textContent = text;
+        analysisList.appendChild(li);
+      });
+
+      keywordRow.innerHTML = '';
+      keywords.forEach(k => {
+        const pill = document.createElement('div');
+        pill.className = 'pill';
+        pill.textContent = k;
+        keywordRow.appendChild(pill);
+      });
+
+      analysisPop.classList.add('active');
+      clearTimeout(hideAnalysisTimer);
+      hideAnalysisTimer = setTimeout(() => analysisPop.classList.remove('active'), 6000);
+    };
+
+    const toggleSubtitlePanel = () => {
+      subtitlePanel.classList.toggle('active');
+      if (!subtitlePanel.classList.contains('active')) {
+        analysisPop.classList.remove('active');
+      }
+    };
+
+    const syncProgress = () => {
+      progressBar.max = audioEl.duration || 0;
+      progressBar.value = audioEl.currentTime || 0;
+      currentTimeEl.textContent = formatTime(audioEl.currentTime);
+      totalTimeEl.textContent = formatTime(audioEl.duration);
+    };
+
+    voiceprint.addEventListener('click', toggleSubtitlePanel);
+    playBtn.addEventListener('click', () => audioEl.play());
+    pauseBtn.addEventListener('click', () => audioEl.pause());
+    progressBar.addEventListener('input', (e) => {
+      audioEl.currentTime = Number(e.target.value);
+    });
+    audioEl.addEventListener('timeupdate', syncProgress);
+    audioEl.addEventListener('loadedmetadata', syncProgress);
+
+    fileInput.addEventListener('change', async (e) => {
+      const [file] = e.target.files || [];
+      if (!file) return;
+      const text = await file.text();
+      scriptInput.value = text;
+      statusTag.textContent = `已加载：${file.name}`;
+    });
+
+    const fetchAudio = async () => {
+      const text = scriptInput.value.trim();
+      if (!text) {
+        alert('请先粘贴或上传需要精听的文本');
+        return;
+      }
+      generateBtn.disabled = true;
+      statusTag.textContent = 'MiniMax 生成中…';
+      stageStatus.textContent = 'TTS 合成中，准备声纹波纹';
+      try {
+        const resp = await fetch('/api/listening', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text }),
+        });
+        if (!resp.ok) throw new Error(await resp.text());
+        const data = await resp.json();
+        subtitles = data.subtitles;
+        renderSubtitles();
+        audioEl.src = data.audio_url;
+        stageStatus.textContent = '点击声纹查看字幕，点击字幕获取 6s 解析';
+        statusTag.textContent = '已生成，可播放';
+        subtitlePanel.classList.add('active');
+        loadingScreen.classList.add('hidden');
+      } catch (err) {
+        console.error(err);
+        alert('合成失败，请检查 MiniMax API Key 或稍后再试');
+        statusTag.textContent = '生成失败';
+      } finally {
+        generateBtn.disabled = false;
+      }
+    };
+
+    generateBtn.addEventListener('click', fetchAudio);
+
+    window.addEventListener('load', () => {
+      setTimeout(() => loadingScreen.classList.add('hidden'), 1400);
+      scriptInput.value = 'In the listening section, a Cambridge admissions officer explains how AI-assisted note-taking should complement critical thinking. Pay attention to the contrastive stress patterns and subtle British intonation shifts.';
+    });
+  </script>
+</body>
+</html>
