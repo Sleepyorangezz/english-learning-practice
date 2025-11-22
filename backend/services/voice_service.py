@@ -1,130 +1,119 @@
-import os
 import json
-import websockets
-import asyncio
 import logging
+import os
+from pathlib import Path
+from typing import List, Optional
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
+import websockets
+
 logger = logging.getLogger(__name__)
 
-API_KEY = os.getenv("DASHSCOPE_API_KEY")
-# Using Beijing region URL as per documentation
-API_URL = "wss://dashscope.aliyuncs.com/api-ws/v1/realtime?model=qwen3-tts-flash-realtime"
 
-class VoiceService:
-    def __init__(self):
-        self.api_key = API_KEY
+class MiniMaxVoiceService:
+    """Generate speech audio through MiniMax synchronous WebSocket API."""
+
+    def __init__(
+        self,
+        api_key: Optional[str] = None,
+        model: str = "speech-2.6-hd",
+        voice_id: str = "English_expressive_narrator",
+        file_format: str = "mp3",
+    ):
+        self.api_key = api_key or os.getenv("MINIMAX_API_KEY")
+        self.model = model
+        self.voice_id = voice_id
+        self.file_format = file_format
+
         if not self.api_key:
-            logger.error("DASHSCOPE_API_KEY not found in environment variables")
+            logger.warning("MINIMAX_API_KEY not set. Audio synthesis will fail without it.")
+
+    async def _connect(self):
+        url = "wss://api.minimax.io/ws/v1/t2a_v2"
+        headers = {"Authorization": f"Bearer {self.api_key}"}
+        return await websockets.connect(url, additional_headers=headers)
+
+    async def synthesize(self, text: str) -> bytes:
+        """Generate an audio byte string for the given text."""
+        if not text.strip():
+            raise ValueError("Input text for synthesis cannot be empty.")
+
+        async with await self._connect() as ws:
+            logger.info("Connected to MiniMax TTS service")
+
+            handshake = json.loads(await ws.recv())
+            if handshake.get("event") != "connected_success":
+                raise RuntimeError(f"Failed to open MiniMax session: {handshake}")
+
+            start_msg = {
+                "event": "task_start",
+                "model": self.model,
+                "voice_setting": {
+                    "voice_id": self.voice_id,
+                    "speed": 1,
+                    "vol": 1,
+                    "pitch": 0,
+                    "english_normalization": False,
+                },
+                "audio_setting": {
+                    "sample_rate": 32000,
+                    "bitrate": 128000,
+                    "format": self.file_format,
+                    "channel": 1,
+                },
+            }
+
+            await ws.send(json.dumps(start_msg))
+            started = json.loads(await ws.recv())
+            if started.get("event") != "task_started":
+                raise RuntimeError(f"MiniMax task did not start: {started}")
+
+            await ws.send(
+                json.dumps(
+                    {
+                        "event": "task_continue",
+                        "text": text,
+                    }
+                )
+            )
+
+            audio_chunks: List[bytes] = []
+
+            while True:
+                response = json.loads(await ws.recv())
+
+                if "data" in response and "audio" in response["data"]:
+                    hex_audio = response["data"]["audio"]
+                    if hex_audio:
+                        audio_chunks.append(bytes.fromhex(hex_audio))
+
+                if response.get("is_final"):
+                    break
+
+            await ws.send(json.dumps({"event": "task_finish"}))
+            return b"".join(audio_chunks)
+
+    async def synthesize_to_file(self, text: str, output_path: Path) -> Path:
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        audio_bytes = await self.synthesize(text)
+        output_path.write_bytes(audio_bytes)
+        logger.info("Saved synthesized audio to %s", output_path)
+        return output_path
 
     async def stream_audio(self, text_iterator):
-        """
-        Streams audio from Bailian TTS for a given text iterator (async generator).
-        """
-        headers = {
-            "Authorization": f"Bearer {self.api_key}"
-        }
-        
-        async with websockets.connect(API_URL, extra_headers=headers) as ws:
-            logger.info("Connected to Bailian TTS WebSocket")
-            
-            # Initial session update
-            session_update = {
-                "type": "session.update",
-                "session": {
-                    "mode": "server_commit", # Or "commit" if we want more control
-                    "model": "qwen3-tts-flash-realtime",
-                    "voice": "Cherry", # Default voice, can be parameterized
-                    "response_format": "pcm",
-                    "sample_rate": 24000
-                }
-            }
-            await ws.send(json.dumps(session_update))
-            
-            # Handle incoming messages loop in background or interleaved
-            # For simplicity, we'll assume a request-response flow where we send text and get audio
-            
-            # But wait, Bailian Realtime API is bidirectional. 
-            # We need to listen for 'session.created' first.
-            
-            async def receiver():
-                while True:
-                    try:
-                        message = await ws.recv()
-                        data = json.loads(message)
-                        # logger.debug(f"Received: {data['type']}")
-                        
-                        if data['type'] == 'response.audio.delta':
-                            yield data['delta'] # Base64 encoded PCM
-                        elif data['type'] == 'response.done':
-                            pass # Response finished
-                        elif data['type'] == 'session.finished':
-                            break
-                        elif data['type'] == 'error':
-                            logger.error(f"Bailian Error: {data}")
-                    except websockets.exceptions.ConnectionClosed:
-                        break
+        """Compatibility layer for existing websocket flow.
 
-            # We need to manage sending and receiving concurrently.
-            # For this MVP, let's define a simpler interface: generate_audio(text)
-            # But the requirement is "Realtime". 
-            
-            # Let's implement a generator that yields audio chunks.
-            
-            # Wait for session.created
-            while True:
-                msg = await ws.recv()
-                data = json.loads(msg)
-                if data['type'] == 'session.created':
-                    logger.info("Session created")
-                    break
-            
-            # Send text
-            async for text_chunk in text_iterator:
-                if text_chunk:
-                    input_event = {
-                        "type": "input_text_buffer.append",
-                        "text": text_chunk
-                    }
-                    await ws.send(json.dumps(input_event))
-            
-            # Commit (if needed, but server_commit mode handles it? 
-            # Doc says: "server_commit: Client sends text only. Server intelligently judges...")
-            # But we might need to close or signal end.
-            
-            # Actually, for a conversation, we might keep the connection open?
-            # For now, let's assume one turn = one connection or keep-alive.
-            # Let's close for now after text is done.
-            
-            # Wait for audio
-            while True:
-                msg = await ws.recv()
-                data = json.loads(msg)
-                if data['type'] == 'response.audio.delta':
-                    yield data['delta']
-                elif data['type'] == 'response.done':
-                    # Check if we are done with all text? 
-                    # In server_commit mode, it might be tricky to know when to stop if we are streaming text.
-                    # But if text_iterator finishes, we are done sending.
-                    # We should wait until all audio is received.
-                    pass
-                
-                # We need a break condition.
-                # If we know we sent everything, maybe we wait for response.done?
-                # But response.done is for one response. 
-                
-                # Let's rely on a timeout or explicit close for now if needed.
-                # Or better, just yield until the socket closes or we decide to stop.
-                
-    async def synthesize(self, text: str):
+        The MiniMax API returns audio after we send the full text; we therefore
+        aggregate the incoming text chunks and yield a single audio payload.
         """
-        Simple synthesis for a single string.
-        """
-        async def text_gen():
-            yield text
-        
-        async for chunk in self.stream_audio(text_gen()):
-            yield chunk
 
-voice_service = VoiceService()
+        collected_text = ""
+        async for text_chunk in text_iterator:
+            collected_text += text_chunk
+
+        if not collected_text.strip():
+            return
+
+        yield await self.synthesize(collected_text)
+
+
+voice_service = MiniMaxVoiceService()
