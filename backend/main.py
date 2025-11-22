@@ -1,11 +1,16 @@
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File
-from fastapi.middleware.cors import CORSMiddleware
-import uvicorn
-import os
-import shutil
 import logging
-import asyncio
+import os
+import re
+from pathlib import Path
+from typing import List
+from uuid import uuid4
+
+import uvicorn
 from dotenv import load_dotenv
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 
 # Load environment variables before importing services
 load_dotenv(dotenv_path="../.env")
@@ -20,6 +25,10 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI()
 
+MEDIA_DIR = Path(__file__).parent / "generated_audio"
+MEDIA_DIR.mkdir(parents=True, exist_ok=True)
+FRONTEND_DIR = Path(__file__).parent.parent / "frontend"
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -28,9 +37,63 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.mount("/media", StaticFiles(directory=str(MEDIA_DIR)), name="media")
+app.mount("/web", StaticFiles(directory=str(FRONTEND_DIR), html=True), name="frontend")
+
+
+class ListeningRequest(BaseModel):
+    text: str
+
+
+def _split_sentences(text: str) -> List[str]:
+    pieces = re.split(r"(?<=[.!?。！？])\s+", text.strip())
+    return [p.strip() for p in pieces if p.strip()]
+
+
+def _build_subtitles(text: str) -> List[dict]:
+    sentences = _split_sentences(text)
+    subtitles = []
+    cursor = 0.0
+    for idx, sentence in enumerate(sentences):
+        words = len(sentence.split())
+        duration = max(1.8, words * 0.35)
+        subtitles.append(
+            {
+                "id": idx,
+                "text": sentence,
+                "start": round(cursor, 2),
+                "duration": round(duration, 2),
+            }
+        )
+        cursor += duration
+    return subtitles
+
 @app.get("/")
 def read_root():
     return {"message": "AI IELTS Speaking Assistant Backend"}
+
+
+@app.post("/api/listening")
+async def generate_listening(request: ListeningRequest):
+    text = request.text.strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="Text input is required for listening synthesis.")
+
+    filename = f"listening-{uuid4().hex}.{voice_service.file_format}"
+    file_path = MEDIA_DIR / filename
+
+    try:
+        await voice_service.synthesize_to_file(text, file_path)
+    except Exception as exc:
+        logger.error("MiniMax synthesis failed: %s", exc)
+        raise HTTPException(status_code=500, detail="Failed to synthesize audio with MiniMax.") from exc
+
+    subtitles = _build_subtitles(text)
+
+    return {
+        "audio_url": f"/media/{filename}",
+        "subtitles": subtitles,
+    }
 
 @app.websocket("/ws/chat")
 async def websocket_endpoint(websocket: WebSocket):
